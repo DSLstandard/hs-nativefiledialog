@@ -1,0 +1,3 @@
+packages: ./nativefiledialog.cabal
+
+allow-newer: all
