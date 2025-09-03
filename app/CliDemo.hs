@@ -5,6 +5,7 @@ module Main where
 import Control.Applicative
 import Control.Exception
 import Control.Monad
+import Data.Text qualified as T
 import Foreign
 import qualified Bindings.GLFW as GLFW
 import qualified Graphics.UI.GLFW as GLFW
@@ -13,6 +14,7 @@ import qualified NativeFileDialog as NFD
 import qualified Options.Applicative as Opts
 import qualified SDL
 import qualified SDL.Internal.Types
+import qualified Text.Read
 
 data ParentWindowType
   = ParentWindowType'None
@@ -25,11 +27,13 @@ data Command
       { defaultPath :: Maybe FilePath
       , multiple :: Bool
       , parentWindow :: ParentWindowType
+      , filterList :: [NFD.FilterItem]
       }
   | Command'SaveDialog
       { defaultPath :: Maybe FilePath
       , defaultName :: String
       , parentWindow :: ParentWindowType
+      , filterList :: [NFD.FilterItem]
       }
   | Command'PickFolder
       { defaultPath :: Maybe FilePath
@@ -61,14 +65,16 @@ parseCLI =
     defaultPath <- arg'DefaultPath
     multiple <- arg'Multiple
     parentWindow <- arg'ParentWindow
-    pure Command'OpenDialog{defaultPath, multiple, parentWindow}
+    filterList <- arg'FilterItems
+    pure Command'OpenDialog{defaultPath, multiple, parentWindow, filterList}
 
   cmd'SaveDialog :: Opts.ParserInfo Command
   cmd'SaveDialog = withInfo "Open a save dialog" do
     defaultPath <- arg'DefaultPath
     defaultName <- arg'DefaultName
     parentWindow <- arg'ParentWindow
-    pure Command'SaveDialog{defaultPath, defaultName, parentWindow}
+    filterList <- arg'FilterItems
+    pure Command'SaveDialog{defaultPath, defaultName, parentWindow, filterList}
 
   cmd'PickFolder :: Opts.ParserInfo Command
   cmd'PickFolder = withInfo "Open a folder-picker dialog" do
@@ -98,6 +104,26 @@ parseCLI =
     , Opts.metavar "PATH"
     , Opts.help "Specify the default file path to start the file dialog on"
     ]
+
+  arg'FilterItems :: Opts.Parser [NFD.FilterItem]
+  arg'FilterItems =
+    asum
+      [ Opts.option filterListReader $ mconcat
+          [ Opts.short 'f'
+          , Opts.long "filter"
+          , Opts.metavar "FILTER"
+          , Opts.help "Specify a list of filter items. The input is parsed as Haskell expression of type [(Text, [Text])]. Usage: -f '[(\"Source Files\", [\"c\", \"cpp\"]), (\"Header Files\", [\"h\", \"hpp\"])]'"
+          ]
+      , pure []
+      ]
+   where
+    filterListReader :: Opts.ReadM [NFD.FilterItem]
+    filterListReader = Opts.eitherReader \input -> do
+      case Text.Read.readMaybe @[(T.Text, [T.Text])] input of
+        Nothing -> do
+          Left $ "Failed to parse filter list: " <> input
+        Just items -> do
+          Right $ fmap (\(name, specs) -> NFD.FilterItem{name, specs}) items
 
   arg'DefaultName :: Opts.Parser String
   arg'DefaultName = Opts.strOption $ mconcat
@@ -164,15 +190,15 @@ main = do
   bracket_ NFD.initialize NFD.quit do
     withParentWindow (parentWindow cmd) \parentwin -> do
       case cmd of
-        Command'OpenDialog{defaultPath, multiple} -> do
+        Command'OpenDialog{defaultPath, multiple, filterList} -> do
           if multiple
             then do
-              print =<< NFD.openDialog NFD.Multiple defaultPath [] parentwin
+              print =<< NFD.openDialog NFD.Multiple defaultPath filterList parentwin
             else do
-              print =<< NFD.openDialog NFD.Single defaultPath [] parentwin
+              print =<< NFD.openDialog NFD.Single defaultPath filterList parentwin
 
-        Command'SaveDialog{defaultPath, defaultName} -> do
-          print =<< NFD.saveDialog defaultName defaultPath [] parentwin
+        Command'SaveDialog{defaultPath, defaultName, filterList} -> do
+          print =<< NFD.saveDialog defaultName defaultPath filterList parentwin
 
         Command'PickFolder{defaultPath, multiple} -> do
           if multiple
