@@ -11,14 +11,16 @@ https://github.com/btzy/nativefiledialog-extended?tab=readme-ov-file#.
 Example usage:
 ```haskell
 import qualified System.Directory
+import System.FilePath (FilePath)
 import qualified NativeFileDialog as NFD
+import qualified Data.Text as T
 
 main :: IO ()
 main = do
   homedir <- System.Directory.getHomeDirectory
 
   -- Opens a file dialog for users to pick C/C++ files.
-  result <- NFD.openDialog
+  result :: NFD.DialogResult [FilePath] <- NFD.openDialog
     NFD.Multiple
     (Just homedir)
     [ NFD.FilterItem "Source Files" ["c", "cpp"]
@@ -27,10 +29,10 @@ main = do
     Nothing -- You may optionally specify the parent window of the file dialog
 
   case result of
-    NFD.Ok files -> do
+    NFD.DialogResult'Picked files -> do
       putStrLn $ "User selected files: " <> show files
-    NFD.Cancel -> do
+    NFD.DialogResult'Cancelled -> do
       putStrLn "User cancelled"
-    NFD.Error err -> do
-      putStrLn $ "Error: " <> err
+    NFD.DialogResult'Error err -> do
+      putStrLn $ "Error: " <> T.unpack err
 ```
