@@ -393,24 +393,24 @@ setArgs'WithParentWindow ::
 setArgs'WithParentWindow args' input = liftIO do
   let hdl = castPtr $ offset @"parentWindow" @args args'
 
-  success <- case input of
+  case input of
     Nothing -> do
-      [C.block| bool {
+      [C.block| void {
         nfdwindowhandle_t* hdl = (nfdwindowhandle_t *) $(void* hdl);
         hdl->type = NFD_WINDOW_HANDLE_TYPE_UNSET;
-        return true;
       } |]
     Just (ParentWindow'SDL2 sdlWindow) -> do
-      [C.exp| bool {
+      ok <- [C.exp| bool {
         NFD_GetNativeWindowFromSDLWindow((SDL_Window*) $(void* sdlWindow), (nfdwindowhandle_t *) $(void* hdl))
       } |]
+      unless (toBool ok) do
+        raiseInternalError ("Failed to get native window handle from SDL2 window of address " <> T.pack (show sdlWindow))
     Just (ParentWindow'GLFW3 glfwWindow) -> do
-      [C.exp| bool {
+      ok <- [C.exp| bool {
         NFD_GetNativeWindowFromGLFWWindow((GLFWwindow*) $(void* glfwWindow), (nfdwindowhandle_t *) $(void* hdl))
       } |]
-
-  unless (toBool success) do
-    raiseInternalError "failed to set parent window handle"
+      unless (toBool ok) do
+        raiseInternalError ("Failed to get native window handle from GLFW3 window of address " <> T.pack (show glfwWindow))
 
 setArgs'WithDefaultName ::
   forall args.

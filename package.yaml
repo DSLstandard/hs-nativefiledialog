@@ -123,6 +123,7 @@ executables:
     dependencies:
       - GLFW-b
       - base
+      - bindings-GLFW
       - nativefiledialog
       - optparse-applicative
       - sdl2

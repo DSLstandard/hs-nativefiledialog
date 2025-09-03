@@ -173,6 +173,7 @@ executable cli-demo
   build-depends:
       GLFW-b
     , base
+    , bindings-GLFW
     , nativefiledialog
     , optparse-applicative
     , sdl2

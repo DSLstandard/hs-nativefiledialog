@@ -3,22 +3,38 @@
 module Main where
 
 import Control.Applicative
-import NativeFileDialog qualified as NFD
-import Options.Applicative qualified as Opts
 import Control.Exception
+import Control.Monad
+import Foreign
+import qualified Bindings.GLFW as GLFW
+import qualified Graphics.UI.GLFW as GLFW
+import qualified Graphics.UI.GLFW.C as GLFW
+import qualified NativeFileDialog as NFD
+import qualified Options.Applicative as Opts
+import qualified SDL
+import qualified SDL.Internal.Types
+
+data ParentWindowType
+  = ParentWindowType'None
+  | ParentWindowType'SDL2
+  | ParentWindowType'GLFW3
+  deriving (Show, Eq, Ord, Enum, Bounded)
 
 data Command
   = Command'OpenDialog
       { defaultPath :: Maybe FilePath
       , multiple :: Bool
+      , parentWindow :: ParentWindowType
       }
   | Command'SaveDialog
       { defaultPath :: Maybe FilePath
       , defaultName :: String
+      , parentWindow :: ParentWindowType
       }
   | Command'PickFolder
       { defaultPath :: Maybe FilePath
       , multiple :: Bool
+      , parentWindow :: ParentWindowType
       }
   deriving (Show)
 
@@ -44,19 +60,36 @@ parseCLI =
   cmd'OpenDialog = withInfo "Open an open dialog" do
     defaultPath <- arg'DefaultPath
     multiple <- arg'Multiple
-    pure Command'OpenDialog{defaultPath, multiple}
+    parentWindow <- arg'ParentWindow
+    pure Command'OpenDialog{defaultPath, multiple, parentWindow}
 
   cmd'SaveDialog :: Opts.ParserInfo Command
   cmd'SaveDialog = withInfo "Open a save dialog" do
     defaultPath <- arg'DefaultPath
     defaultName <- arg'DefaultName
-    pure Command'SaveDialog{defaultPath, defaultName}
+    parentWindow <- arg'ParentWindow
+    pure Command'SaveDialog{defaultPath, defaultName, parentWindow}
 
   cmd'PickFolder :: Opts.ParserInfo Command
   cmd'PickFolder = withInfo "Open a folder-picker dialog" do
     defaultPath <- arg'DefaultPath
     multiple <- arg'Multiple
-    pure Command'PickFolder{defaultPath, multiple}
+    parentWindow <- arg'ParentWindow
+    pure Command'PickFolder{defaultPath, multiple, parentWindow}
+
+  arg'ParentWindow :: Opts.Parser ParentWindowType
+  arg'ParentWindow =
+    asum
+      [ Opts.flag' ParentWindowType'SDL2 $ mconcat
+        [ Opts.long "sdl2"
+        , Opts.help "Used for testing. Spawns a SDL2 window as the parent window of the file dialog"
+        ]
+      , Opts.flag' ParentWindowType'GLFW3 $ mconcat
+        [ Opts.long "glfw3"
+        , Opts.help "Used for testing. Spawns a GLFW3 window as the parent window of the file dialog"
+        ]
+      , pure ParentWindowType'None
+      ]
 
   arg'DefaultPath :: Opts.Parser (Maybe FilePath)
   arg'DefaultPath = optional $ Opts.strOption $ mconcat
@@ -83,6 +116,45 @@ parseCLI =
     , Opts.help "If set, the file dialog will allow selecting multiple files"
     ]
 
+-- | Helper function to create a parent window of the specified type, run the
+-- given action with the parent window, and then clean up the parent window.
+withParentWindow :: ParentWindowType -> (Maybe NFD.ParentWindow -> IO r) -> IO r
+withParentWindow ParentWindowType'None continue =
+  continue Nothing
+withParentWindow ParentWindowType'SDL2 continue =
+  bracket_
+    SDL.initializeAll
+    SDL.quit
+    ( do
+        win :: SDL.Window <-
+          SDL.createWindow "SDL2 window" SDL.defaultWindow
+            { SDL.windowVisible = True
+            , SDL.windowResizable = True
+            }
+        let SDL.Internal.Types.Window (winhdl :: Ptr ()) = win
+        result <- continue (Just (NFD.ParentWindow'SDL2 winhdl))
+        SDL.destroyWindow win
+        pure result
+    )
+withParentWindow ParentWindowType'GLFW3 continue =
+  bracket_
+    ( do
+        ok <- GLFW.init
+        unless ok do
+          error "Failed to initialize GLFW"
+    )
+    GLFW.terminate
+    ( do
+        win :: GLFW.Window <- GLFW.createWindow 640 480 "GLFW window" Nothing Nothing >>= \case
+          Nothing -> error "Failed to create GLFW window"
+          Just w -> pure w
+        let winhdl :: Ptr GLFW.C'GLFWwindow = GLFW.toC win
+        let winhdl' :: Ptr () = castPtr winhdl
+        result <- continue (Just (NFD.ParentWindow'GLFW3 winhdl'))
+        GLFW.destroyWindow win
+        pure result
+    )
+
 main :: IO ()
 main = do
   cmd <- parseCLI
@@ -90,20 +162,21 @@ main = do
   putStrLn $ "CLI Input: " <> show cmd
 
   bracket_ NFD.initialize NFD.quit do
-    case cmd of
-      Command'OpenDialog{defaultPath, multiple} -> do
-        if multiple
-          then do
-            print =<< NFD.openDialog NFD.Multiple defaultPath [] Nothing
-          else do
-            print =<< NFD.openDialog NFD.Single defaultPath [] Nothing
+    withParentWindow (parentWindow cmd) \parentwin -> do
+      case cmd of
+        Command'OpenDialog{defaultPath, multiple} -> do
+          if multiple
+            then do
+              print =<< NFD.openDialog NFD.Multiple defaultPath [] parentwin
+            else do
+              print =<< NFD.openDialog NFD.Single defaultPath [] parentwin
 
-      Command'SaveDialog{defaultPath, defaultName} -> do
-        print =<< NFD.saveDialog defaultName defaultPath [] Nothing
+        Command'SaveDialog{defaultPath, defaultName} -> do
+          print =<< NFD.saveDialog defaultName defaultPath [] parentwin
 
-      Command'PickFolder{defaultPath, multiple} -> do
-        if multiple
-          then do
-            print =<< NFD.pickFolder NFD.Multiple defaultPath Nothing
-          else do
-            print =<< NFD.pickFolder NFD.Single defaultPath Nothing
+        Command'PickFolder{defaultPath, multiple} -> do
+          if multiple
+            then do
+              print =<< NFD.pickFolder NFD.Multiple defaultPath parentwin
+            else do
+              print =<< NFD.pickFolder NFD.Single defaultPath parentwin
