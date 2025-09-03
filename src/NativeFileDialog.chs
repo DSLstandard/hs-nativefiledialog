@@ -1,3 +1,17 @@
+-- | A high-level Haskell binding to
+-- <https://github.com/btzy/nativefiledialog-extended>.
+--
+-- As per the README of <https://github.com/btzy/nativefiledialog-extended>, the
+-- library has many platform-specific quirks you should be aware of if you plan
+-- to develop reliable cross-platform applications. For in-depth details about
+-- the nativefiledialog (NFD) library and the API, you may check out
+-- <https://github.com/btzy/nativefiledialog-extended?tab=readme-ov-file#>.
+--
+-- Tip: it is recommended that you import this module like so:
+--
+-- @
+-- import qualified NativeFileDialog as NFD
+-- @
 module NativeFileDialog
 ( -- * Initialization & Quitting
   initialize
@@ -14,7 +28,7 @@ module NativeFileDialog
 , saveDialog
 , pickFolder
 
--- * Errors
+-- * Error types
 , NFDError(..)
 , InternalError(..)
 ) where
@@ -47,7 +61,7 @@ C.include "nfd_glfw3.h"
 
 -- | Initialize NFD. Must be called before any other functions.
 --
--- May throw a 'NFDError' if initialization fails.
+-- Throws a 'NFDError' if initialization fails.
 initialize :: (MonadIO m) => m ()
 initialize = liftIO do
   nfdresult <- {#call NFD_Init as c'NFD_Init #}
@@ -59,7 +73,8 @@ quit :: MonadIO m => m ()
 quit = liftIO do
   {#call NFD_Quit as c'NFD_Quit #}
 
--- | Opens a file open dialog.
+-- | Opens a file open dialog. You must call this after 'initialize', or else
+-- your program will segfault/crash.
 openDialog ::
   (MonadIO m) =>
   -- | Pick a single path or multiple paths?
@@ -72,6 +87,8 @@ openDialog ::
   [FilterItem] ->
   -- | The parent window, if any.
   Maybe ParentWindow ->
+  -- | Dialog result. If this is 'DialogResult'Picked', it contains the selected
+  -- file path(s).
   m (DialogResult result)
 openDialog howmany defaultpath filteritems parentwindow = evalManaged do
   (castPtr -> args') <- managedOpenDialogArgs defaultpath filteritems parentwindow
@@ -83,7 +100,8 @@ openDialog howmany defaultpath filteritems parentwindow = evalManaged do
       [C.exp| int { NFD_OpenDialogMultipleU8_With((const nfdpathset_t**) $(void** outpathset''), $(void* args')) } |]
     )
 
--- | Opens a file save dialog.
+-- | Opens a file save dialog. You must call this after 'initialize', or else
+-- your program will segfault/crash.
 saveDialog ::
   MonadIO m =>
   -- | Default file name
@@ -94,14 +112,18 @@ saveDialog ::
   Maybe FilePath ->
   -- | Filter items
   [FilterItem] ->
+  -- | The parent window, if any.
   Maybe ParentWindow ->
+  -- | Dialog result. If this is 'DialogResult'Picked', it contains the file
+  -- path the user specified to save file to.
   m (DialogResult FilePath)
 saveDialog defaultfilename defaultpath filteritems parentwindow = evalManaged do
   (castPtr -> args') <- managedSaveDialogArgs defaultfilename defaultpath filteritems parentwindow
   liftIO $ usingOutPath \outpath'' ->
     [C.exp| int { NFD_SaveDialogU8_With($(char** outpath''), $(void* args')) } |]
 
--- | Opens a folder picker dialog.
+-- | Opens a folder picker dialog. You must call this after 'initialize', or
+-- else your program will segfault/crash.
 pickFolder ::
   (MonadIO m) =>
   -- | Pick a single path or multiple paths?
@@ -110,7 +132,10 @@ pickFolder ::
   -- "Platform-specific Quirks" section for more details about the behaviour of
   -- this option on Windows)
   Maybe FilePath ->
+  -- | The parent window, if any.
   Maybe ParentWindow ->
+  -- | Dialog result. If this is 'DialogResult'Picked', it contains the selected
+  -- directory path(s).
   m (DialogResult result)
 pickFolder howmany defaultpath parentwindow = evalManaged do
   (castPtr -> args') <- managedPickFolderArgs defaultpath parentwindow
@@ -161,6 +186,7 @@ instance Enum NFDWindowHandleType where
 
 -- # INTERNAL UTIL: ARGS
 
+-- | A filter item for file dialogs.
 data FilterItem = FilterItem
   { name :: T.Text
   -- ^ Display name of this filter item.
@@ -169,25 +195,29 @@ data FilterItem = FilterItem
   --
   -- The list is joined with the comma character @','@ to before passing to NFD.
   --
-  -- * Note: On macOS, the file dialogs do not have friendly names and there is
-  --   no way to switch between filters, so the filter specifications are
-  --   combined (e.g. "c,cpp,cc,h,hpp").  The filter specification is also never
-  --   explicitly shown to the user.  This is usual macOS behaviour and users
-  --   expect it.*
+  -- The following notes are given by the creator of
+  -- <https://github.com/btzy/nativefiledialog-extended?tab=readme-ov-file#> in
+  -- the repository's README:
   --
-  -- * Note 2: You must ensure that the specification string is non-empty and
-  --   that every file extension has at least one character.  Otherwise, bad
-  --   things might ensue (i.e. undefined behaviour).*
+  --     * Note: On macOS, the file dialogs do not have friendly names and there is
+  --       no way to switch between filters, so the filter specifications are
+  --       combined (e.g. "c,cpp,cc,h,hpp").  The filter specification is also never
+  --       explicitly shown to the user.  This is usual macOS behaviour and users
+  --       expect it.*
   --
-  -- * Note 3: On Linux, the file extension is appended (if missing) when the
-  --   user presses down the "Save" button.  The appended file extension will
-  --   remain visible to the user, even if an overwrite prompt is shown and the
-  --   user then presses "Cancel".*
+  --     * Note 2: You must ensure that the specification string is non-empty and
+  --       that every file extension has at least one character.  Otherwise, bad
+  --       things might ensue (i.e. undefined behaviour).*
   --
-  -- * Note 4: Linux is designed for case-sensitive file filters, but this is
-  --   perhaps not what most users expect.  A simple hack is used to make
-  --   filters case-insensitive.  To get case-sensitive filtering, set the
-  --   @NFD_CASE_SENSITIVE_FILTER@ build option to ON.*
+  --     * Note 3: On Linux, the file extension is appended (if missing) when the
+  --       user presses down the "Save" button.  The appended file extension will
+  --       remain visible to the user, even if an overwrite prompt is shown and the
+  --       user then presses "Cancel".*
+  --
+  --     * Note 4: Linux is designed for case-sensitive file filters, but this is
+  --       perhaps not what most users expect.  A simple hack is used to make
+  --       filters case-insensitive.  To get case-sensitive filtering, set the
+  --       @NFD_CASE_SENSITIVE_FILTER@ build option to ON.*
   }
   deriving (Show, Eq, Ord)
 
@@ -323,8 +353,11 @@ data DialogResult a
     DialogResult'Error T.Text
   deriving (Show, Eq, Ord, Functor, Foldable, Traversable)
 
+-- | Specify whether you want to pick a single path or multiple paths.
 data HowMany :: Type -> Type where
+  -- | Pick a single file path.
   Single :: HowMany FilePath
+  -- | Pick multiple file paths.
   Multiple :: HowMany [FilePath]
 
 type NFDPathSetPtr = Ptr ()
