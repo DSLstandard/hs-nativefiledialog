@@ -45,22 +45,29 @@
 {-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE ViewPatterns #-}
 
+import Control.Monad.IO.Class
 import Data.Bool
+import Debug.Trace
+import Distribution.Compiler qualified as Compiler
 import Distribution.PackageDescription qualified as PackageDescription
 import Distribution.Simple qualified as Simple
+import Distribution.Types.BuildInfo qualified as BuildInfo
 import Distribution.Simple.LocalBuildInfo qualified as LocalBuildInfo
 import Distribution.Simple.Program qualified as Program
 import Distribution.Simple.Setup qualified as Setup
 import Distribution.Simple.Utils qualified as Utils
 import Distribution.Types.Flag qualified as Flag
+import Distribution.Simple.Flag qualified as MonoidFlag
 import Distribution.Verbosity qualified as Verbosity
-import Optics.Core
-import Optics.TH
+import Optics.Core as Optics
+import Optics.TH as Optics
 import System.Directory (getCurrentDirectory)
 import System.FilePath ((</>))
 
 makeFieldLabelsNoPrefix ''LocalBuildInfo.LocalBuildInfo
+makeFieldLabelsNoPrefix ''BuildInfo.BuildInfo
 makeFieldLabelsNoPrefix ''PackageDescription.PackageDescription
+makeFieldLabelsNoPrefix ''Setup.BuildFlags
 
 -- TIP: See https://github.com/google/btls/blob/master/Setup.hs
 -- TIP: See https://github.com/deech/fltkhs/blob/master/Setup.hs
@@ -71,47 +78,64 @@ ninjaProgram = Program.simpleProgram "ninja"
 main :: IO ()
 main = do
   let h = Simple.simpleUserHooks
-  Simple.defaultMainWithHooks
-    h
-      { Simple.hookedPrograms =
-          [ cmakeProgram
-          , ninjaProgram
+  Simple.defaultMainWithHooks h
+    { Simple.hookedPrograms =
+        [ cmakeProgram
+        , ninjaProgram
+        ]
+    , Simple.confHook = \info confFlags -> do
+        -- We want "Make it possible to directly link a haskell library with
+        -- an external static C library(.a)"
+        -- https://github.com/haskell/cabal/issues/4042, but currently we
+        -- don't know how. We will follow how
+        -- https://github.com/jakubfijalkowski/hlibsass is set up.
+
+        -- Here, we build the '.a' library of 'nativefiledialog' with the
+        -- source under './nativefiledialog-extended/'.
+
+        -- Parse package flags
+        let flags = confFlags.configConfigurationsFlags
+        nfdLinuxUsePortal <- mustLookupFlag flags "nfd-linux-use-portal"
+
+        lbi <- Simple.confHook h info confFlags
+
+        cwd <- System.Directory.getCurrentDirectory
+        let tmpBuildDir = cwd </> LocalBuildInfo.buildDir lbi
+
+        -- Build the static lib
+        let programDb = view #withPrograms lbi
+        Program.runDbProgram Verbosity.verbose cmakeProgram programDb $
+          [ "-G", "Ninja"
+          , "-S", "nativefiledialog-extended/"
+          , "-B", tmpBuildDir </> "nfd-BUILD"
+          , "-DNFD_PORTAL=" <> bool "OFF" "ON" nfdLinuxUsePortal
+          , "-DBUILD_SHARED_LIBS=OFF"
+          , "-DNFD_BUILD_SDL2_TESTS=OFF"
+          , "-DNFD_BUILD_TESTS=OFF"
           ]
-      , Simple.confHook = \info confFlags -> do
-          -- Here, we build the '.a' library of 'nativefiledialog' with the
-          -- source under './nativefiledialog-extended/'.
 
-          -- Parse package flags
-          let flags = confFlags.configConfigurationsFlags
-          nfdLinuxUsePortal <- mustLookupFlag flags "nfd-linux-use-portal"
+        -- NOTE: This builds ./nfd-BUILD/src/libnfd.a
+        Program.runDbProgram Verbosity.verbose ninjaProgram programDb ["-C", tmpBuildDir </> "nfd-BUILD"]
 
-          -- TIP: To fix "[...] You can make paths relative to the package
-          -- database itself by using ${pkgroot} [...]", see
-          -- https://stackoverflow.com/questions/24444675/use-relative-paths-for-extra-lib-dirs-on-cabal
-          cwd <- System.Directory.getCurrentDirectory
-          localBuildInfo <- Simple.confHook h info confFlags
-          let programDb = view #withPrograms localBuildInfo
-          let tmpBuildDir = cwd </> LocalBuildInfo.buildDir localBuildInfo </> "nativefiledialog-extended-build"
-          Program.runDbProgram Verbosity.verbose cmakeProgram programDb $
-            [ "-G", "Ninja"
-            , "-S", "nativefiledialog-extended/"
-            , "-B", tmpBuildDir
-
-            -- 'nativefiledialog' cmake flags
-            , "-DNFD_PORTAL=" <> bool "OFF" "ON" nfdLinuxUsePortal
-            , "-DBUILD_SHARED_LIBS=OFF"
-            , "-DNFD_BUILD_SDL2_TESTS=OFF"
-            , "-DNFD_BUILD_TESTS=OFF"
-            ]
-          Program.runDbProgram Verbosity.verbose ninjaProgram programDb ["-C", tmpBuildDir, "libnfd.a"]
-
-          let
-            lensBuildInfo = #localPkgDescr % #library % _Just % #libBuildInfo
-            localBuildInfo' = localBuildInfo
-              & over (lensBuildInfo % #extraLibDirs) ((tmpBuildDir </> "src") :) -- NOTE: libnfd.a is located under nativefiledialog-extended-build/src/.
-
-          pure localBuildInfo'
-      }
+        let lbi' = lbi & over
+              (#localPkgDescr % #library % _Just % #libBuildInfo % #extraLibDirs)
+              ([ tmpBuildDir </> "nfd-BUILD" </> "src" ] <>)
+        pure lbi'
+    , Simple.preBuild = \_args buildFlags -> do
+        cwd <- getCurrentDirectory
+        let tmpBuildDir = cwd </> MonoidFlag.fromFlag (buildFlags ^. #buildDistPref)
+        let bi = BuildInfo.emptyBuildInfo & over
+              #extraLibDirs
+              ([ tmpBuildDir </> "nfd-BUILD" </> "src" ] <> )
+        return (Just bi, [])
+    , Simple.postCopy = \_args flags pkgdescr lbi -> do
+        cwd <- getCurrentDirectory
+        let tmpBuildDir = cwd </> LocalBuildInfo.buildDir lbi
+        let libPref = view #libdir $ LocalBuildInfo.absoluteInstallDirs pkgdescr lbi (MonoidFlag.fromFlag flags.copyDest)
+        Utils.installExecutableFile Verbosity.verbose
+          (tmpBuildDir </> "nfd-BUILD" </> "src" </> "libnfd.a")
+          (libPref </> "libnfd.a")
+    }
 
 mustLookupFlag :: Flag.FlagAssignment -> Flag.FlagName -> IO Bool
 mustLookupFlag flags name = do
@@ -120,4 +144,3 @@ mustLookupFlag flags name = do
       Utils.dieNoVerbosity $ "IMPOSSIBLE: unknown flag: " <> Flag.unFlagName name
     Just ison -> do
       pure ison
-
