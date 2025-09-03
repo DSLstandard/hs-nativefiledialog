@@ -56,7 +56,7 @@ quit :: MonadIO m => m ()
 quit = liftIO do
   {#call NFD_Quit as c'NFD_Quit #}
 
--- | File open dialog.
+-- | Opens a file open dialog.
 openDialog ::
   (MonadIO m) =>
   -- | Pick a single path or multiple paths?
@@ -80,6 +80,7 @@ openDialog howmany defaultpath filteritems parentwindow = evalManaged do
       [C.exp| int { NFD_OpenDialogMultipleU8_With((const nfdpathset_t**) $(void** outpathset''), $(void* args')) } |]
     )
 
+-- | Opens a file save dialog.
 saveDialog ::
   MonadIO m =>
   -- | Default file name
@@ -97,6 +98,7 @@ saveDialog defaultfilename defaultpath filteritems parentwindow = evalManaged do
   liftIO $ usingOutPath \outpath'' ->
     [C.exp| int { NFD_SaveDialogU8_With($(char** outpath''), $(void* args')) } |]
 
+-- | Opens a folder picker dialog.
 pickFolder ::
   (MonadIO m) =>
   -- | Pick a single path or multiple paths?
