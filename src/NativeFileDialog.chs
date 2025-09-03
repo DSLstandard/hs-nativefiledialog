@@ -4,6 +4,9 @@ module NativeFileDialog
 , quit
 
 -- * Dialog utils
+, WindowHandle'SDL2
+, WindowHandle'GLFW3
+, ParentWindow(..)
 , FilterItem(..)
 , DialogResult(..)
 , HowMany(..)
@@ -336,9 +339,13 @@ usingOutByHowMany ::
 usingOutByHowMany Single onSingle _onMultiple = usingOutPath onSingle
 usingOutByHowMany Multiple _onSingle onMultiple = usingOutPathSet onMultiple
 
+-- | The window handle type for SDL2.
 type WindowHandle'SDL2 = Ptr ()
+
+-- | The window handle type for GLFW3.
 type WindowHandle'GLFW3 = Ptr ()
 
+-- | The parent window for the dialog.
 data ParentWindow
   = ParentWindow'SDL2 WindowHandle'SDL2
   | ParentWindow'GLFW3 WindowHandle'GLFW3
