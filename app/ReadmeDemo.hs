@@ -1,15 +1,5 @@
-# `hs-nativefiledialog`
+module Main where
 
-High-level Haskell bindings to
-https://github.com/btzy/nativefiledialog-extended, a cross platform (Windows,
-Mac, Linux) native file dialog library, and a fork of
-https://github.com/mlabbe/nativefiledialog.
-
-For in-depth details about the nativefiledialog (NFD) library and the API, you may check out
-https://github.com/btzy/nativefiledialog-extended?tab=readme-ov-file#.
-
-Example usage:
-```haskell
 import Control.Exception
 import qualified Data.Text as T
 import qualified NativeFileDialog as NFD
@@ -35,4 +25,3 @@ main = bracket_ NFD.initialize NFD.quit do
       putStrLn "User cancelled"
     NFD.DialogResult'Error err -> do
       putStrLn $ "Error: " <> T.unpack err
-```

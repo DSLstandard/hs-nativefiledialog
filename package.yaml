@@ -116,9 +116,9 @@ library:
   
 
 executables:
-  demo:
+  cli-demo:
     source-dirs: app/
-    main: Demo.hs
+    main: CliDemo.hs
     other-modules: []
     dependencies:
       - GLFW-b
@@ -128,3 +128,13 @@ executables:
       - sdl2
       - text
 
+  readme-demo:
+    source-dirs: app/
+    main: ReadmeDemo.hs
+    other-modules: []
+    dependencies:
+      - base
+      - directory
+      - filepath
+      - nativefiledialog
+      - text

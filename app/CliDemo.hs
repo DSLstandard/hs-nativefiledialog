@@ -27,7 +27,7 @@ parseCLI =
   Opts.execParser $
     Opts.info
       (Opts.helper <*> cmd'All)
-      (Opts.fullDesc <> Opts.progDesc "Demo Skottie animation viewer")
+      (Opts.fullDesc <> Opts.progDesc "A CLI demo for hs-nativefiledialog")
  where
   withInfo :: String -> Opts.Parser a -> Opts.ParserInfo a
   withInfo description cmd = 
